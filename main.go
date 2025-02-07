@@ -25,6 +25,7 @@ func startServer() error {
 
 	s := &http.Server{
 		Addr:         os.Args[1],
+		Handler:      newHub(),
 		ReadTimeout:  time.Second * 10,
 		WriteTimeout: time.Second * 10,
 	}
