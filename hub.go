@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"sync"
 )
@@ -24,8 +25,19 @@ func (hub *Hub) createRoom(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
 	hub.roomsMu.Lock()
-	hub.rooms[id] = &Room{}
+	_, ok := hub.rooms[id]
+	if !ok {
+		hub.rooms[id] = &Room{}
+	}
 	hub.roomsMu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	if !ok {
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(fmt.Sprintf(`{"id": "%s"}`, id)))
+	} else {
+		http.Error(w, `{"error": "Room already exists."}`, http.StatusConflict)
+	}
 }
 
 func newHub() *Hub {
@@ -33,6 +45,6 @@ func newHub() *Hub {
 		rooms: make(map[string]*Room),
 	}
 
-	hub.serveMux.HandleFunc("/room/{id}", hub.createRoom)
+	hub.serveMux.HandleFunc("POST /room/{id}", hub.createRoom)
 	return hub
 }
