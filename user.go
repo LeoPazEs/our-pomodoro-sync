@@ -9,13 +9,13 @@ import (
 	"github.com/coder/websocket"
 )
 
-type userConnHandler interface {
+type UserConnHandler interface {
 	closeSlow()
 	readMsgChannel(ctx context.Context) error
 	writeMsg(ctx context.Context, msg []byte) error
 }
 
-type userConn struct {
+type UserConn struct {
 	connMu  sync.Mutex
 	closed  bool
 	conn    *websocket.Conn
@@ -23,11 +23,11 @@ type userConn struct {
 	timeout time.Duration
 }
 
-func createUserConn(conn *websocket.Conn) *userConn {
-	return &userConn{conn: conn, msgs: make(chan []byte), timeout: time.Second * 5}
+func createUserConn(conn *websocket.Conn) *UserConn {
+	return &UserConn{conn: conn, msgs: make(chan []byte), timeout: time.Second * 5}
 }
 
-func (uc *userConn) closeSlow() {
+func (uc *UserConn) closeSlow() {
 	uc.connMu.Lock()
 	defer uc.connMu.Unlock()
 	uc.closed = true
@@ -36,7 +36,7 @@ func (uc *userConn) closeSlow() {
 	}
 }
 
-func (uc *userConn) readMsgChannel(ctx context.Context) error {
+func (uc *UserConn) readMsgChannel(ctx context.Context) error {
 	uc.connMu.Lock()
 	if uc.closed {
 		uc.connMu.Unlock()
@@ -59,19 +59,21 @@ func (uc *userConn) readMsgChannel(ctx context.Context) error {
 	}
 }
 
-func (uc *userConn) writeMsg(ctx context.Context, msg []byte) error {
+func (uc *UserConn) writeMsg(ctx context.Context, msg []byte) error {
 	ctx, cancel := context.WithTimeout(ctx, uc.timeout)
 	defer cancel()
 
 	return uc.conn.Write(ctx, websocket.MessageText, msg)
 }
 
-type user struct {
-	conn userConnHandler
+type User struct {
+	conn  UserConnHandler
+	token string
 }
 
-func createUser(conn *websocket.Conn) *user {
-	return &user{
-		conn: createUserConn(conn),
+func createUser(conn *websocket.Conn, token string) *User {
+	return &User{
+		conn:  createUserConn(conn),
+		token: token,
 	}
 }
