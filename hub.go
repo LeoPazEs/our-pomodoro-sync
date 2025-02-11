@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"sync"
 
@@ -12,8 +11,9 @@ import (
 type hubManager interface {
 	createRoom(w http.ResponseWriter, r *http.Request)
 	joinRoom(w http.ResponseWriter, r *http.Request)
-	subscribeUser()
-	unsubscribeUser()
+	subscribeUser(room string, user *user)
+	unsubscribeUser(room string, user *user)
+	checkDeleteEmptyRoom(room string)
 }
 
 type Hub struct {
@@ -27,7 +27,7 @@ func (hub *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	hub.serveMux.ServeHTTP(w, r)
 }
 
-func (hub *Hub) createRoom(w http.ResponseWriter, r *http.Request) {
+func (hub *Hub) createRoomHandler(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
 	hub.roomsMu.Lock()
@@ -37,23 +37,25 @@ func (hub *Hub) createRoom(w http.ResponseWriter, r *http.Request) {
 	}
 	hub.roomsMu.Unlock()
 
-	w.Header().Set("Content-Type", "application/json")
 	if !ok {
-		hub.joinRoom(w, r)
+		hub.joinRoomHandler(w, r)
 	} else {
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)
 		w.Write([]byte(`{"error": "Room already exists."}`))
 	}
 }
 
-func (hub *Hub) joinRoom(w http.ResponseWriter, r *http.Request) {
+func (hub *Hub) joinRoomHandler(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
 	hub.roomsMu.Lock()
-	defer hub.roomsMu.Unlock()
 	_, ok := hub.rooms[id]
+	hub.roomsMu.Unlock()
 	if !ok {
-		http.Error(w, `{"error": "The room does not exist."}`, http.StatusConflict)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		w.Write([]byte(`{"error": "The room does not exist."}`))
 		return
 	}
 
@@ -68,27 +70,36 @@ func (hub *Hub) joinRoom(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user := createUser(conn)
-
 	hub.subscribeUser(id, user)
 
-	go user.conn.readMsgChannel(context.Background())
-
-	w.WriteHeader(http.StatusAccepted)
-	w.Write([]byte(fmt.Sprintf(`{"id": "%s"}`, id)))
+	user.conn.readMsgChannel(context.Background())
+	hub.unsubscribeUser(id, user)
+	hub.checkDeleteEmptyRoom(id)
 }
 
 func (hub *Hub) subscribeUser(room string, user *user) {
 	hub.rooms[room].userMux.Lock()
 	defer hub.rooms[room].userMux.Unlock()
-	// Remember to add a close and start another connection is user already in room
 	hub.rooms[room].users[user] = struct{}{}
 }
 
 func (hub *Hub) unsubscribeUser(room string, user *user) {
 	hub.rooms[room].userMux.Lock()
 	defer hub.rooms[room].userMux.Unlock()
-	// Remeber to check if still has users in the room to close it if no one is there
 	delete(hub.rooms[room].users, user)
+}
+
+func (hub *Hub) checkDeleteEmptyRoom(room string) {
+	hub.roomsMu.Lock()
+	defer hub.roomsMu.Unlock()
+
+	hub.rooms[room].userMux.Lock()
+	if len(hub.rooms[room].users) > 0 {
+		hub.rooms[room].userMux.Unlock()
+		return
+	}
+	hub.rooms[room].userMux.Unlock()
+	delete(hub.rooms, room)
 }
 
 func newHub() *Hub {
@@ -96,6 +107,8 @@ func newHub() *Hub {
 		rooms: make(map[string]*Room),
 	}
 
-	hub.serveMux.HandleFunc("GET /room/{id}", hub.createRoom)
+	hub.serveMux.HandleFunc("GET /room/{id}", hub.createRoomHandler)
+	hub.serveMux.HandleFunc("GET /room/join/{id}", hub.joinRoomHandler)
+	// hub.serveMux.HandleFunc("GET /room/publish/{id}", hub.joinRoomHa)
 	return hub
 }

@@ -45,7 +45,7 @@ func (uc *userConn) readMsgChannel(ctx context.Context) error {
 	uc.connMu.Unlock()
 
 	defer uc.conn.CloseNow()
-	uc.conn.CloseRead(ctx)
+	ctx = uc.conn.CloseRead(ctx)
 	for {
 		select {
 		case msg := <-uc.msgs:

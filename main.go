@@ -30,8 +30,6 @@ func startServer() error {
 		WriteTimeout: time.Second * 10,
 	}
 
-	// Add close WS connection in error handler.
-
 	errc := make(chan error, 1)
 	go func() {
 		errc <- s.ListenAndServe()
