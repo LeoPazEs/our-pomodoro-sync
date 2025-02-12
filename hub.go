@@ -3,13 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"sync"
 
 	"github.com/coder/websocket"
 )
 
-type hubManager interface {
+type HubRoomManager interface {
 	createRoomHandler(w http.ResponseWriter, r *http.Request)
 	joinRoomHandler(w http.ResponseWriter, r *http.Request)
 	writeMsgToRoomHandler(w http.ResponseWriter, r *http.Request)
@@ -42,7 +43,7 @@ func (hub *Hub) createRoomHandler(w http.ResponseWriter, r *http.Request) {
 	hub.roomsMu.Lock()
 	_, ok := hub.rooms[id]
 	if !ok {
-		hub.rooms[id] = createRoom()
+		hub.rooms[id] = NewRoom()
 	}
 	hub.roomsMu.Unlock()
 
@@ -84,7 +85,7 @@ func (hub *Hub) joinRoomHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user := createUser(conn, token)
+	user := NewUser(conn, token)
 	hub.subscribeUser(id, token, user)
 
 	user.conn.readMsgChannel(context.Background())
@@ -93,32 +94,48 @@ func (hub *Hub) joinRoomHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (hub *Hub) writeMsgToRoomHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
 	token := r.Header.Get("Authorization")
 	if len(token) == 0 {
-		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		w.Write([]byte(`{"error": "Unauthorized."}`))
 		return
 	}
+
 	id := r.PathValue("id")
 
 	if r.Header.Get("Content-Type") == "application/json" {
-		msg := message{}
-		err := json.NewDecoder(r.Body).Decode(&msg)
+		msg := Message{}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read request body", http.StatusInternalServerError)
+			return
+		}
+		r.Body.Close()
+
+		err = json.Unmarshal(body, &msg)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte(`{"error": "Decoding error, check json format."}`))
 			return
 		}
+
 		hub.roomsMu.Lock()
-		if _, ok := hub.rooms[id]; !ok {
+		defer hub.roomsMu.Unlock()
+		room, ok := hub.rooms[id]
+		if !ok {
 			w.WriteHeader(http.StatusConflict)
 			w.Write([]byte(`{"error": "The room does not exist."}`))
 			return
 		}
 
+		jsonMsg, _ := json.Marshal(msg)
+		room.publishToRoom(jsonMsg)
+		w.WriteHeader(http.StatusAccepted)
+		w.Write(jsonMsg)
+		return
 	}
-
 	w.WriteHeader(http.StatusBadRequest)
 	w.Write([]byte(`{"error": "Json endpoint."}`))
 }
@@ -148,7 +165,7 @@ func (hub *Hub) checkDeleteEmptyRoom(room string) {
 	delete(hub.rooms, room)
 }
 
-func newHub() *Hub {
+func NewHub() *Hub {
 	hub := &Hub{
 		rooms: make(map[string]*Room),
 	}

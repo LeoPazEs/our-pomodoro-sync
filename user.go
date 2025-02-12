@@ -12,7 +12,8 @@ import (
 type UserConnHandler interface {
 	closeSlow()
 	readMsgChannel(ctx context.Context) error
-	writeMsg(ctx context.Context, msg []byte) error
+	sendMsg(ctx context.Context, msg []byte) error
+	writeToBuffer(msg []byte)
 }
 
 type UserConn struct {
@@ -23,8 +24,16 @@ type UserConn struct {
 	timeout time.Duration
 }
 
-func createUserConn(conn *websocket.Conn) *UserConn {
+func NewUserConn(conn *websocket.Conn) *UserConn {
 	return &UserConn{conn: conn, msgs: make(chan []byte), timeout: time.Second * 5}
+}
+
+func (uc *UserConn) writeToBuffer(msg []byte) {
+	select {
+	case uc.msgs <- msg:
+	default:
+		uc.closeSlow()
+	}
 }
 
 func (uc *UserConn) closeSlow() {
@@ -49,7 +58,7 @@ func (uc *UserConn) readMsgChannel(ctx context.Context) error {
 	for {
 		select {
 		case msg := <-uc.msgs:
-			err := uc.writeMsg(ctx, msg)
+			err := uc.sendMsg(ctx, msg)
 			if err != nil {
 				return err
 			}
@@ -59,7 +68,7 @@ func (uc *UserConn) readMsgChannel(ctx context.Context) error {
 	}
 }
 
-func (uc *UserConn) writeMsg(ctx context.Context, msg []byte) error {
+func (uc *UserConn) sendMsg(ctx context.Context, msg []byte) error {
 	ctx, cancel := context.WithTimeout(ctx, uc.timeout)
 	defer cancel()
 
@@ -71,9 +80,9 @@ type User struct {
 	token string
 }
 
-func createUser(conn *websocket.Conn, token string) *User {
+func NewUser(conn *websocket.Conn, token string) *User {
 	return &User{
-		conn:  createUserConn(conn),
+		conn:  NewUserConn(conn),
 		token: token,
 	}
 }
