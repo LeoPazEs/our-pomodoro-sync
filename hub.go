@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"sync"
@@ -10,71 +12,115 @@ import (
 	"github.com/coder/websocket"
 )
 
-type HubRoomManager interface {
+type HubServe struct {
+	serveMux http.ServeMux
+	hub      HubRoomAndUser
+}
+
+func NewHubServe(hub HubRoomAndUser) *HubServe {
+	hubServe := &HubServe{hub: hub}
+
+	hubServe.serveMux.HandleFunc("GET /room/{id}", hubServe.createRoomHandler)
+	hubServe.serveMux.HandleFunc("GET /room/join/{id}", hubServe.joinRoomHandler)
+	hubServe.serveMux.HandleFunc("POST /room/publish/{id}", hubServe.writeMsgToRoomHandler)
+	return hubServe
+}
+
+func (hubServe *HubServe) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	hubServe.serveMux.ServeHTTP(w, r)
+}
+
+type RequestHandler interface {
+	authorize(r *http.Request) (string, error)
+}
+
+func (hubServe *HubServe) authorize(r *http.Request) (string, error) {
+	token := r.Header.Get("Authorization")
+	if len(token) <= 0 {
+		return "", errors.New("Unauthorized")
+	}
+	return token, nil
+}
+
+type ResponseHandler interface {
+	contentType(w http.ResponseWriter) http.ResponseWriter
+	errorResponse(status int,
+		error string,
+		w http.ResponseWriter,
+	) http.ResponseWriter
+	successResponse(status int,
+		response []byte,
+		w http.ResponseWriter,
+	) http.ResponseWriter
+}
+
+func (hubServe *HubServe) contentType(w http.ResponseWriter) http.ResponseWriter {
+	w.Header().Set("Content-Type", "application/json")
+	return w
+}
+
+func (hubServe *HubServe) errorResponse(
+	status int,
+	error string,
+	w http.ResponseWriter,
+) http.ResponseWriter {
+	hubServe.contentType(w)
+	w.WriteHeader(status)
+	w.Write([]byte(fmt.Sprintf(`{"error": "%s"}`, error)))
+	return w
+}
+
+func (hubServe *HubServe) successResponse(
+	status int,
+	response []byte,
+	w http.ResponseWriter,
+) http.ResponseWriter {
+	hubServe.contentType(w)
+	w.WriteHeader(status)
+	w.Write(response)
+	return w
+}
+
+type HubServeHandler interface {
 	createRoomHandler(w http.ResponseWriter, r *http.Request)
 	joinRoomHandler(w http.ResponseWriter, r *http.Request)
 	writeMsgToRoomHandler(w http.ResponseWriter, r *http.Request)
-	subscribeUser(room string, username string, user *User)
-	unsubscribeUser(room string, username string, user *User)
-	checkDeleteEmptyRoom(room string)
 }
 
-type Hub struct {
-	serveMux http.ServeMux
+func (hubServe *HubServe) createRoomHandler(w http.ResponseWriter, r *http.Request) {
+	_, err := hubServe.authorize(r)
+	if err != nil {
+		hubServe.errorResponse(http.StatusUnauthorized, err.Error(), w)
+		return
+	}
 
-	roomsMu sync.Mutex
-	rooms   map[string]*Room
+	id := r.PathValue("id")
+
+	id, err = hubServe.hub.registerRoom(id)
+	if err != nil {
+		hubServe.errorResponse(http.StatusConflict, fmt.Sprintf(`{"error": "%s"}`, err), w)
+		return
+	}
+
+	// This looks bad
+	hubServe.joinRoomHandler(w, r)
 }
 
-func (hub *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	hub.serveMux.ServeHTTP(w, r)
-}
-
-func (hub *Hub) createRoomHandler(w http.ResponseWriter, r *http.Request) {
-	token := r.Header.Get("Authorization")
-	if len(token) == 0 {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"error": "Unauthorized."}`))
+func (hubServe *HubServe) joinRoomHandler(w http.ResponseWriter, r *http.Request) {
+	token, err := hubServe.authorize(r)
+	if err != nil {
+		hubServe.errorResponse(http.StatusUnauthorized, err.Error(), w)
 		return
 	}
 	id := r.PathValue("id")
 
-	hub.roomsMu.Lock()
-	_, ok := hub.rooms[id]
+	ok := hubServe.hub.checkExistsRoom(id)
 	if !ok {
-		hub.rooms[id] = NewRoom()
-	}
-	hub.roomsMu.Unlock()
-
-	if !ok {
-		hub.joinRoomHandler(w, r)
-	} else {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusConflict)
-		w.Write([]byte(`{"error": "Room already exists."}`))
-	}
-}
-
-func (hub *Hub) joinRoomHandler(w http.ResponseWriter, r *http.Request) {
-	token := r.Header.Get("Authorization")
-	if len(token) == 0 {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"error": "Unauthorized."}`))
-		return
-	}
-	id := r.PathValue("id")
-
-	hub.roomsMu.Lock()
-	_, ok := hub.rooms[id]
-	hub.roomsMu.Unlock()
-	if !ok {
-		w.WriteHeader(http.StatusConflict)
-		w.Write([]byte(`{"error": "The room does not exist."}`))
+		hubServe.errorResponse(http.StatusConflict, "The room does not exist.", w)
 		return
 	}
 
+	// Has to lock rooms
 	conn, err := websocket.Accept(w, r, nil)
 	if err != nil {
 		http.Error(
@@ -86,20 +132,17 @@ func (hub *Hub) joinRoomHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user := NewUser(conn, token)
-	hub.subscribeUser(id, token, user)
+	hubServe.hub.subscribeUserToRoom(id, token, user)
 
 	user.conn.readMsgChannel(context.Background())
-	hub.unsubscribeUser(id, token, user)
-	hub.checkDeleteEmptyRoom(id)
+	hubServe.hub.unsubscribeUserToRoom(id, token, user)
+	hubServe.hub.deleteEmptyRoom(id)
 }
 
-func (hub *Hub) writeMsgToRoomHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	token := r.Header.Get("Authorization")
-	if len(token) == 0 {
-		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"error": "Unauthorized."}`))
+func (hubServe *HubServe) writeMsgToRoomHandler(w http.ResponseWriter, r *http.Request) {
+	_, err := hubServe.authorize(r)
+	if err != nil {
+		hubServe.errorResponse(http.StatusUnauthorized, err.Error(), w)
 		return
 	}
 
@@ -109,69 +152,104 @@ func (hub *Hub) writeMsgToRoomHandler(w http.ResponseWriter, r *http.Request) {
 		msg := Message{}
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
-			http.Error(w, "Failed to read request body", http.StatusInternalServerError)
+			http.Error(w, "Failed to read request body.", http.StatusInternalServerError)
 			return
 		}
 		r.Body.Close()
 
 		err = json.Unmarshal(body, &msg)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(`{"error": "Decoding error, check json format."}`))
+			hubServe.errorResponse(http.StatusBadRequest, "Decoding error, check json format.", w)
 			return
 		}
 
-		hub.roomsMu.Lock()
-		defer hub.roomsMu.Unlock()
-		room, ok := hub.rooms[id]
+		ok := hubServe.hub.checkExistsRoom(id)
 		if !ok {
-			w.WriteHeader(http.StatusConflict)
-			w.Write([]byte(`{"error": "The room does not exist."}`))
+			hubServe.errorResponse(http.StatusConflict, "The room does not exist.", w)
 			return
 		}
 
 		jsonMsg, _ := json.Marshal(msg)
-		room.publishToRoom(jsonMsg)
-		w.WriteHeader(http.StatusAccepted)
-		w.Write(jsonMsg)
+		hubServe.hub.publishToRoom(id, jsonMsg)
+		hubServe.successResponse(http.StatusAccepted, jsonMsg, w)
 		return
 	}
 	w.WriteHeader(http.StatusBadRequest)
 	w.Write([]byte(`{"error": "Json endpoint."}`))
 }
 
-func (hub *Hub) subscribeUser(room string, username string, user *User) {
-	hub.rooms[room].userMux.Lock()
-	defer hub.rooms[room].userMux.Unlock()
-	hub.rooms[room].users[username] = user
-}
-
-func (hub *Hub) unsubscribeUser(room string, username string, user *User) {
-	hub.rooms[room].userMux.Lock()
-	defer hub.rooms[room].userMux.Unlock()
-	delete(hub.rooms[room].users, username)
-}
-
-func (hub *Hub) checkDeleteEmptyRoom(room string) {
-	hub.roomsMu.Lock()
-	defer hub.roomsMu.Unlock()
-
-	hub.rooms[room].userMux.Lock()
-	if len(hub.rooms[room].users) > 0 {
-		hub.rooms[room].userMux.Unlock()
-		return
-	}
-	hub.rooms[room].userMux.Unlock()
-	delete(hub.rooms, room)
+type Hub struct {
+	roomsMu sync.Mutex
+	rooms   map[string]RoomUserHandler
 }
 
 func NewHub() *Hub {
 	hub := &Hub{
-		rooms: make(map[string]*Room),
+		rooms: make(map[string]RoomUserHandler),
 	}
-
-	hub.serveMux.HandleFunc("GET /room/{id}", hub.createRoomHandler)
-	hub.serveMux.HandleFunc("GET /room/join/{id}", hub.joinRoomHandler)
-	hub.serveMux.HandleFunc("POST /room/publish/{id}", hub.writeMsgToRoomHandler)
 	return hub
+}
+
+type HubRoomHandler interface {
+	deleteEmptyRoom(room string)
+	checkExistsRoom(room string) bool
+	registerRoom(room string) (string, error)
+	publishToRoom(room string, msg []byte)
+}
+
+func (hub *Hub) deleteEmptyRoom(room string) {
+	hub.roomsMu.Lock()
+	defer hub.roomsMu.Unlock()
+
+	// For now if someone enters the room between the count and the delete the room is excluded
+	if hub.rooms[room].countUsers() > 0 {
+		return
+	}
+	delete(hub.rooms, room)
+}
+
+func (hub *Hub) checkExistsRoom(room string) bool {
+	hub.roomsMu.Lock()
+	defer hub.roomsMu.Unlock()
+	_, ok := hub.rooms[room]
+	return ok
+}
+
+func (hub *Hub) registerRoom(room string) (string, error) {
+	hub.roomsMu.Lock()
+	defer hub.roomsMu.Unlock()
+
+	if _, ok := hub.rooms[room]; !ok {
+		hub.rooms[room] = NewRoom()
+		return room, nil
+	}
+	return "", errors.New("Room already exists.")
+}
+
+func (hub *Hub) publishToRoom(room string, msg []byte) {
+	hub.roomsMu.Lock()
+	defer hub.roomsMu.Unlock()
+	hub.rooms[room].publish(msg)
+}
+
+type HubUserHandler interface {
+	subscribeUserToRoom(room string, id string, user UserHandler)
+	unsubscribeUserToRoom(room string, username string, user UserHandler)
+}
+
+func (hub *Hub) subscribeUserToRoom(room string, username string, user UserHandler) {
+	hub.roomsMu.Lock()
+	defer hub.roomsMu.Unlock()
+	hub.rooms[room].subscribeUser(username, user)
+}
+
+func (hub *Hub) unsubscribeUserToRoom(room string, username string, user UserHandler) {
+	hub.roomsMu.Lock()
+	defer hub.roomsMu.Unlock()
+	hub.rooms[room].unsubscribeUser(username, user)
+}
+
+type HubRoomAndUser interface {
+	HubUserHandler
+	HubRoomHandler
 }

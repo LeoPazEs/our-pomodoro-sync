@@ -9,7 +9,7 @@ import (
 	"github.com/coder/websocket"
 )
 
-type UserConnHandler interface {
+type ConnHandler interface {
 	closeSlow()
 	readMsgChannel(ctx context.Context) error
 	sendMsg(ctx context.Context, msg []byte) error
@@ -76,13 +76,21 @@ func (uc *UserConn) sendMsg(ctx context.Context, msg []byte) error {
 }
 
 type User struct {
-	conn  UserConnHandler
-	token string
+	conn     ConnHandler
+	username string
 }
 
 func NewUser(conn *websocket.Conn, token string) *User {
 	return &User{
-		conn:  NewUserConn(conn),
-		token: token,
+		conn:     NewUserConn(conn),
+		username: token,
 	}
+}
+
+type UserHandler interface {
+	writeMsg([]byte)
+}
+
+func (user *User) writeMsg(msg []byte) {
+	user.conn.writeToBuffer(msg)
 }
