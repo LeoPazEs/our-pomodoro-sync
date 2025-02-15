@@ -174,8 +174,7 @@ func (hubServe *HubServe) writeMsgToRoomHandler(w http.ResponseWriter, r *http.R
 		hubServe.successResponse(http.StatusAccepted, jsonMsg, w)
 		return
 	}
-	w.WriteHeader(http.StatusBadRequest)
-	w.Write([]byte(`{"error": "Json endpoint."}`))
+	hubServe.errorResponse(http.StatusBadRequest, "Json endpoint.", w)
 }
 
 type Hub struct {
