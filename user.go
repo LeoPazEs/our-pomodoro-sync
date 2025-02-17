@@ -80,9 +80,8 @@ type User struct {
 	username string
 }
 
-func NewUser(conn *websocket.Conn, token string) *User {
+func NewUser(token string) *User {
 	return &User{
-		conn:     NewUserConn(conn),
 		username: token,
 	}
 }

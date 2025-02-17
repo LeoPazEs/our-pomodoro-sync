@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -26,20 +27,25 @@ func NewRoom() *Room {
 }
 
 type RoomUserHandler interface {
-	publish(msg []byte)
+	publish(msg []byte, user string) error
 	subscribeUser(username string, user UserHandler)
 	unsubscribeUser(username string, user UserHandler)
 	countUsers() int
 }
 
-func (room *Room) publish(msg []byte) {
+func (room *Room) publish(msg []byte, user string) error {
 	room.userMux.Lock()
 	defer room.userMux.Unlock()
+	if _, ok := room.users[user]; !ok {
+		// Make error handling
+		return errors.New("User not in room.")
+	}
 
 	room.publishLimit.Wait(context.Background())
 	for _, user := range room.users {
 		go user.writeMsg(msg)
 	}
+	return nil
 }
 
 func (room *Room) subscribeUser(username string, user UserHandler) {

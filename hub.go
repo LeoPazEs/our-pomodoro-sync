@@ -114,13 +114,13 @@ func (hubServe *HubServe) joinRoomHandler(w http.ResponseWriter, r *http.Request
 	}
 	id := r.PathValue("id")
 
-	ok := hubServe.hub.checkExistsRoom(id)
-	if !ok {
-		hubServe.errorResponse(http.StatusConflict, "The room does not exist.", w)
+	user := NewUser(token)
+	err = hubServe.hub.subscribeUserToRoom(id, token, user)
+	if err != nil {
+		hubServe.errorResponse(http.StatusConflict, err.Error(), w)
 		return
 	}
 
-	// Has to lock rooms
 	conn, err := websocket.Accept(w, r, nil)
 	if err != nil {
 		http.Error(
@@ -128,11 +128,11 @@ func (hubServe *HubServe) joinRoomHandler(w http.ResponseWriter, r *http.Request
 			"Failed to establish WebSocket connection",
 			http.StatusInternalServerError,
 		)
+		hubServe.hub.unsubscribeUserToRoom(id, token, user)
+		hubServe.hub.deleteEmptyRoom(id)
 		return
 	}
-
-	user := NewUser(conn, token)
-	hubServe.hub.subscribeUserToRoom(id, token, user)
+	user.conn = NewUserConn(conn)
 
 	user.conn.readMsgChannel(context.Background())
 	hubServe.hub.unsubscribeUserToRoom(id, token, user)
@@ -140,41 +140,42 @@ func (hubServe *HubServe) joinRoomHandler(w http.ResponseWriter, r *http.Request
 }
 
 func (hubServe *HubServe) writeMsgToRoomHandler(w http.ResponseWriter, r *http.Request) {
-	_, err := hubServe.authorize(r)
+	token, err := hubServe.authorize(r)
 	if err != nil {
 		hubServe.errorResponse(http.StatusUnauthorized, err.Error(), w)
+		return
+	}
+	if r.Header.Get("Content-Type") != "application/json" {
+		hubServe.errorResponse(http.StatusBadRequest, "Json endpoint.", w)
 		return
 	}
 
 	id := r.PathValue("id")
 
-	if r.Header.Get("Content-Type") == "application/json" {
-		msg := Message{}
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, "Failed to read request body.", http.StatusInternalServerError)
-			return
-		}
-		r.Body.Close()
-
-		err = json.Unmarshal(body, &msg)
-		if err != nil {
-			hubServe.errorResponse(http.StatusBadRequest, "Decoding error, check json format.", w)
-			return
-		}
-
-		ok := hubServe.hub.checkExistsRoom(id)
-		if !ok {
-			hubServe.errorResponse(http.StatusConflict, "The room does not exist.", w)
-			return
-		}
-
-		jsonMsg, _ := json.Marshal(msg)
-		hubServe.hub.publishToRoom(id, jsonMsg)
-		hubServe.successResponse(http.StatusAccepted, jsonMsg, w)
+	msg := Message{}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read request body.", http.StatusInternalServerError)
 		return
 	}
-	hubServe.errorResponse(http.StatusBadRequest, "Json endpoint.", w)
+	r.Body.Close()
+
+	err = json.Unmarshal(body, &msg)
+	if err != nil {
+		hubServe.errorResponse(http.StatusBadRequest, "Decoding error, check json format.", w)
+		return
+	}
+
+	jsonMsg, _ := json.Marshal(msg)
+	err = hubServe.hub.publishToRoom(id, jsonMsg, token)
+	if err != nil {
+		// Implement error type check
+		hubServe.errorResponse(http.StatusForbidden, err.Error(), w)
+		hubServe.errorResponse(http.StatusConflict, "The room does not exist.", w)
+		return
+	}
+	hubServe.successResponse(http.StatusAccepted, jsonMsg, w)
+	return
 }
 
 type Hub struct {
@@ -191,9 +192,8 @@ func NewHub() *Hub {
 
 type HubRoomHandler interface {
 	deleteEmptyRoom(room string)
-	checkExistsRoom(room string) bool
 	registerRoom(room string) (string, error)
-	publishToRoom(room string, msg []byte)
+	publishToRoom(roomId string, msg []byte, user string) error
 }
 
 func (hub *Hub) deleteEmptyRoom(room string) {
@@ -207,13 +207,6 @@ func (hub *Hub) deleteEmptyRoom(room string) {
 	delete(hub.rooms, room)
 }
 
-func (hub *Hub) checkExistsRoom(room string) bool {
-	hub.roomsMu.Lock()
-	defer hub.roomsMu.Unlock()
-	_, ok := hub.rooms[room]
-	return ok
-}
-
 func (hub *Hub) registerRoom(room string) (string, error) {
 	hub.roomsMu.Lock()
 	defer hub.roomsMu.Unlock()
@@ -225,27 +218,38 @@ func (hub *Hub) registerRoom(room string) (string, error) {
 	return "", errors.New("Room already exists.")
 }
 
-func (hub *Hub) publishToRoom(room string, msg []byte) {
+func (hub *Hub) publishToRoom(roomId string, msg []byte, user string) error {
 	hub.roomsMu.Lock()
 	defer hub.roomsMu.Unlock()
-	hub.rooms[room].publish(msg)
+	room, ok := hub.rooms[roomId]
+	if !ok {
+		return errors.New("Room does not exist.")
+	}
+	err := room.publish(msg, user)
+	return err
 }
 
 type HubUserHandler interface {
-	subscribeUserToRoom(room string, id string, user UserHandler)
-	unsubscribeUserToRoom(room string, username string, user UserHandler)
+	subscribeUserToRoom(roomId string, username string, user UserHandler) error
+	unsubscribeUserToRoom(roomId string, username string, user UserHandler)
 }
 
-func (hub *Hub) subscribeUserToRoom(room string, username string, user UserHandler) {
+func (hub *Hub) subscribeUserToRoom(roomId string, username string, user UserHandler) error {
 	hub.roomsMu.Lock()
 	defer hub.roomsMu.Unlock()
-	hub.rooms[room].subscribeUser(username, user)
+
+	room, ok := hub.rooms[roomId]
+	if !ok {
+		return errors.New("Room does not exist.")
+	}
+	room.subscribeUser(username, user)
+	return nil
 }
 
-func (hub *Hub) unsubscribeUserToRoom(room string, username string, user UserHandler) {
+func (hub *Hub) unsubscribeUserToRoom(roomId string, username string, user UserHandler) {
 	hub.roomsMu.Lock()
 	defer hub.roomsMu.Unlock()
-	hub.rooms[room].unsubscribeUser(username, user)
+	hub.rooms[roomId].unsubscribeUser(username, user)
 }
 
 type HubRoomAndUser interface {
