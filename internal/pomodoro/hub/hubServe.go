@@ -1,4 +1,4 @@
-package main
+package hub
 
 import (
 	"context"
@@ -7,10 +7,41 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"sync"
 
 	"github.com/coder/websocket"
+
+	"github.com/LeoPazEs/our-pomodoro-sync/internal/pomodoro/message"
+	"github.com/LeoPazEs/our-pomodoro-sync/internal/pomodoro/user"
 )
+
+type HubServeRequestResponseHandler interface {
+	http.Handler
+	RequestHandler
+	ResponseHandler
+	HubServeHandler
+}
+
+type RequestHandler interface {
+	authorize(r *http.Request) (string, error)
+}
+
+type ResponseHandler interface {
+	contentType(w http.ResponseWriter) http.ResponseWriter
+	errorResponse(status int,
+		error string,
+		w http.ResponseWriter,
+	) http.ResponseWriter
+	successResponse(status int,
+		response []byte,
+		w http.ResponseWriter,
+	) http.ResponseWriter
+}
+
+type HubServeHandler interface {
+	createRoomHandler(w http.ResponseWriter, r *http.Request)
+	joinRoomHandler(w http.ResponseWriter, r *http.Request)
+	writeMsgToRoomHandler(w http.ResponseWriter, r *http.Request)
+}
 
 type HubServe struct {
 	serveMux http.ServeMux
@@ -30,28 +61,12 @@ func (hubServe *HubServe) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	hubServe.serveMux.ServeHTTP(w, r)
 }
 
-type RequestHandler interface {
-	authorize(r *http.Request) (string, error)
-}
-
 func (hubServe *HubServe) authorize(r *http.Request) (string, error) {
 	token := r.Header.Get("Authorization")
 	if len(token) <= 0 {
 		return "", errors.New("Unauthorized")
 	}
 	return token, nil
-}
-
-type ResponseHandler interface {
-	contentType(w http.ResponseWriter) http.ResponseWriter
-	errorResponse(status int,
-		error string,
-		w http.ResponseWriter,
-	) http.ResponseWriter
-	successResponse(status int,
-		response []byte,
-		w http.ResponseWriter,
-	) http.ResponseWriter
 }
 
 func (hubServe *HubServe) contentType(w http.ResponseWriter) http.ResponseWriter {
@@ -81,12 +96,6 @@ func (hubServe *HubServe) successResponse(
 	return w
 }
 
-type HubServeHandler interface {
-	createRoomHandler(w http.ResponseWriter, r *http.Request)
-	joinRoomHandler(w http.ResponseWriter, r *http.Request)
-	writeMsgToRoomHandler(w http.ResponseWriter, r *http.Request)
-}
-
 func (hubServe *HubServe) createRoomHandler(w http.ResponseWriter, r *http.Request) {
 	_, err := hubServe.authorize(r)
 	if err != nil {
@@ -114,8 +123,8 @@ func (hubServe *HubServe) joinRoomHandler(w http.ResponseWriter, r *http.Request
 	}
 	id := r.PathValue("id")
 
-	user := NewUser(token)
-	err = hubServe.hub.subscribeUserToRoom(id, token, user)
+	userObj := user.NewUser(token)
+	err = hubServe.hub.subscribeUserToRoom(id, token, userObj)
 	if err != nil {
 		hubServe.errorResponse(http.StatusConflict, err.Error(), w)
 		return
@@ -128,14 +137,15 @@ func (hubServe *HubServe) joinRoomHandler(w http.ResponseWriter, r *http.Request
 			"Failed to establish WebSocket connection",
 			http.StatusInternalServerError,
 		)
-		hubServe.hub.unsubscribeUserToRoom(id, token, user)
+		hubServe.hub.unsubscribeUserToRoom(id, token, userObj)
 		hubServe.hub.deleteEmptyRoom(id)
 		return
 	}
-	user.conn = NewUserConn(conn)
+	userConn := user.NewUserConn(conn)
+	userObj.Connect(userConn)
 
-	user.conn.readMsgChannel(context.Background())
-	hubServe.hub.unsubscribeUserToRoom(id, token, user)
+	userConn.ReadMsgChannel(context.Background())
+	hubServe.hub.unsubscribeUserToRoom(id, token, userObj)
 	hubServe.hub.deleteEmptyRoom(id)
 }
 
@@ -152,7 +162,7 @@ func (hubServe *HubServe) writeMsgToRoomHandler(w http.ResponseWriter, r *http.R
 
 	id := r.PathValue("id")
 
-	msg := Message{}
+	msg := message.Message{}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Failed to read request body.", http.StatusInternalServerError)
@@ -176,83 +186,4 @@ func (hubServe *HubServe) writeMsgToRoomHandler(w http.ResponseWriter, r *http.R
 	}
 	hubServe.successResponse(http.StatusAccepted, jsonMsg, w)
 	return
-}
-
-type Hub struct {
-	roomsMu sync.Mutex
-	rooms   map[string]RoomUserHandler
-}
-
-func NewHub() *Hub {
-	hub := &Hub{
-		rooms: make(map[string]RoomUserHandler),
-	}
-	return hub
-}
-
-type HubRoomHandler interface {
-	deleteEmptyRoom(room string)
-	registerRoom(room string) (string, error)
-	publishToRoom(roomId string, msg []byte, user string) error
-}
-
-func (hub *Hub) deleteEmptyRoom(room string) {
-	hub.roomsMu.Lock()
-	defer hub.roomsMu.Unlock()
-
-	// For now if someone enters the room between the count and the delete the room is excluded
-	if hub.rooms[room].countUsers() > 0 {
-		return
-	}
-	delete(hub.rooms, room)
-}
-
-func (hub *Hub) registerRoom(room string) (string, error) {
-	hub.roomsMu.Lock()
-	defer hub.roomsMu.Unlock()
-
-	if _, ok := hub.rooms[room]; !ok {
-		hub.rooms[room] = NewRoom()
-		return room, nil
-	}
-	return "", errors.New("Room already exists.")
-}
-
-func (hub *Hub) publishToRoom(roomId string, msg []byte, user string) error {
-	hub.roomsMu.Lock()
-	defer hub.roomsMu.Unlock()
-	room, ok := hub.rooms[roomId]
-	if !ok {
-		return errors.New("Room does not exist.")
-	}
-	err := room.publish(msg, user)
-	return err
-}
-
-type HubUserHandler interface {
-	subscribeUserToRoom(roomId string, username string, user UserHandler) error
-	unsubscribeUserToRoom(roomId string, username string, user UserHandler)
-}
-
-func (hub *Hub) subscribeUserToRoom(roomId string, username string, user UserHandler) error {
-	hub.roomsMu.Lock()
-	defer hub.roomsMu.Unlock()
-
-	room, ok := hub.rooms[roomId]
-	if !ok {
-		return errors.New("Room does not exist.")
-	}
-	room.subscribeUser(username, user)
-	return nil
-}
-
-func (hub *Hub) unsubscribeUserToRoom(roomId string, username string, user UserHandler) {
-	hub.roomsMu.Lock()
-	defer hub.roomsMu.Unlock()
-	hub.rooms[roomId].unsubscribeUser(username, user)
-}
-
-type HubRoomAndUser interface {
-	HubUserHandler
-	HubRoomHandler
 }

@@ -1,4 +1,4 @@
-package main
+package user
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 
 type ConnHandler interface {
 	closeSlow()
-	readMsgChannel(ctx context.Context) error
+	ReadMsgChannel(ctx context.Context) error
 	sendMsg(ctx context.Context, msg []byte) error
 	writeToBuffer(msg []byte)
 }
@@ -28,14 +28,6 @@ func NewUserConn(conn *websocket.Conn) *UserConn {
 	return &UserConn{conn: conn, msgs: make(chan []byte), timeout: time.Second * 5}
 }
 
-func (uc *UserConn) writeToBuffer(msg []byte) {
-	select {
-	case uc.msgs <- msg:
-	default:
-		uc.closeSlow()
-	}
-}
-
 func (uc *UserConn) closeSlow() {
 	uc.connMu.Lock()
 	defer uc.connMu.Unlock()
@@ -45,7 +37,7 @@ func (uc *UserConn) closeSlow() {
 	}
 }
 
-func (uc *UserConn) readMsgChannel(ctx context.Context) error {
+func (uc *UserConn) ReadMsgChannel(ctx context.Context) error {
 	uc.connMu.Lock()
 	if uc.closed {
 		uc.connMu.Unlock()
@@ -75,21 +67,10 @@ func (uc *UserConn) sendMsg(ctx context.Context, msg []byte) error {
 	return uc.conn.Write(ctx, websocket.MessageText, msg)
 }
 
-type User struct {
-	conn     ConnHandler
-	username string
-}
-
-func NewUser(token string) *User {
-	return &User{
-		username: token,
+func (uc *UserConn) writeToBuffer(msg []byte) {
+	select {
+	case uc.msgs <- msg:
+	default:
+		uc.closeSlow()
 	}
-}
-
-type UserHandler interface {
-	writeMsg([]byte)
-}
-
-func (user *User) writeMsg(msg []byte) {
-	user.conn.writeToBuffer(msg)
 }
