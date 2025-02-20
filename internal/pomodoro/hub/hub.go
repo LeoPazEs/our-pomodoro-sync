@@ -64,7 +64,7 @@ func (hub *Hub) publishToRoom(roomId string, msg []byte, username string) error 
 
 	roomObj, ok := hub.rooms[roomId]
 	if !ok {
-		return errors.New("Room does not exist.")
+		return RoomDoesNotExistsError
 	}
 	err := roomObj.Publish(msg, username)
 	return err

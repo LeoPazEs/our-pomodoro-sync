@@ -2,7 +2,6 @@ package room
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"time"
 
@@ -39,7 +38,7 @@ func (room *Room) Publish(msg []byte, username string) error {
 	defer room.userMux.Unlock()
 	if _, ok := room.users[username]; !ok {
 		// Make error handling
-		return errors.New("User not in room.")
+		return UserNotInRoomError
 	}
 
 	room.publishLimit.Wait(context.Background())
