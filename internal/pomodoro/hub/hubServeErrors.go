@@ -31,7 +31,7 @@ func (hubError *HubServeErrorImpl) Code() int {
 }
 
 func (hubError *HubServeErrorImpl) Error() string {
-	return fmt.Sprintf(`{"error": "%s"}`, hubError.message)
+	return fmt.Sprintf(`{"code": %d,"message": "%s"}`, hubError.code, hubError.message)
 }
 
 func NewUnauthorizedError(originError error, message string) HubServeError {
