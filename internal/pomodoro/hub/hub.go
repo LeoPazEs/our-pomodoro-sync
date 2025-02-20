@@ -9,14 +9,14 @@ import (
 )
 
 type HubRoomHandler interface {
-	deleteEmptyRoom(roomId string)
-	registerRoom(roomId string) (string, error)
-	publishToRoom(roomId string, msg []byte, username string) error
+	DeleteEmptyRoom(roomId string)
+	RegisterRoom(roomId string) (string, error)
+	PublishToRoom(roomId string, msg []byte, username string) error
 }
 
 type HubUserHandler interface {
-	subscribeUserToRoom(roomId string, username string, userObj user.UserHandler) error
-	unsubscribeUserToRoom(roomId string, username string, userObj user.UserHandler)
+	SubscribeUserToRoom(roomId string, username string, userObj user.UserHandler) error
+	UnsubscribeUserToRoom(roomId string, username string, userObj user.UserHandler)
 }
 
 type HubRoomAndUser interface {
@@ -36,7 +36,7 @@ func NewHub() *Hub {
 	return hub
 }
 
-func (hub *Hub) deleteEmptyRoom(roomId string) {
+func (hub *Hub) DeleteEmptyRoom(roomId string) {
 	hub.roomsMu.Lock()
 	defer hub.roomsMu.Unlock()
 
@@ -47,7 +47,7 @@ func (hub *Hub) deleteEmptyRoom(roomId string) {
 	delete(hub.rooms, roomId)
 }
 
-func (hub *Hub) registerRoom(roomId string) (string, error) {
+func (hub *Hub) RegisterRoom(roomId string) (string, error) {
 	hub.roomsMu.Lock()
 	defer hub.roomsMu.Unlock()
 
@@ -58,7 +58,7 @@ func (hub *Hub) registerRoom(roomId string) (string, error) {
 	return "", errors.New("Room already exists.")
 }
 
-func (hub *Hub) publishToRoom(roomId string, msg []byte, username string) error {
+func (hub *Hub) PublishToRoom(roomId string, msg []byte, username string) error {
 	hub.roomsMu.Lock()
 	defer hub.roomsMu.Unlock()
 
@@ -70,7 +70,7 @@ func (hub *Hub) publishToRoom(roomId string, msg []byte, username string) error 
 	return err
 }
 
-func (hub *Hub) subscribeUserToRoom(
+func (hub *Hub) SubscribeUserToRoom(
 	roomId string,
 	username string,
 	userObj user.UserHandler,
@@ -86,7 +86,7 @@ func (hub *Hub) subscribeUserToRoom(
 	return nil
 }
 
-func (hub *Hub) unsubscribeUserToRoom(roomId string, username string, userObj user.UserHandler) {
+func (hub *Hub) UnsubscribeUserToRoom(roomId string, username string, userObj user.UserHandler) {
 	hub.roomsMu.Lock()
 	defer hub.roomsMu.Unlock()
 	hub.rooms[roomId].UnsubscribeUser(username)

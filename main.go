@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/LeoPazEs/our-pomodoro-sync/internal/pomodoro/hub"
+	"github.com/LeoPazEs/our-pomodoro-sync/internal/pomodoro/serve"
 )
 
 func main() {
@@ -25,8 +26,8 @@ func startServer() error {
 		return errors.New("Missing address to listen in first argument!")
 	}
 
-	var hubHandler hub.HubServeRequestResponseHandler
-	hubHandler = hub.NewHubServe(hub.NewHub())
+	var hubHandler serve.HubServeRequestResponseHandler
+	hubHandler = serve.NewHubServe(hub.NewHub())
 
 	s := &http.Server{
 		Addr:         os.Args[1],
