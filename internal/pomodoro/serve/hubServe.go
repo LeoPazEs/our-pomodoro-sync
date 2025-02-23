@@ -15,28 +15,15 @@ import (
 	"github.com/LeoPazEs/our-pomodoro-sync/internal/pomodoro/user"
 )
 
-type HubServeRequestResponseHandler interface {
-	http.Handler
-	RequestHandler
-	ResponseHandler
-	HubServeHandler
-}
-
-type RequestHandler interface {
-	authorize(r *http.Request) (string, error)
-}
-
-type ResponseHandler interface {
-	jsonResponse(handler http.Handler) http.Handler
-	errorHandler(
-		handler func(w http.ResponseWriter, r *http.Request) HubServeError,
-	) http.Handler
-}
-
 type HubServeHandler interface {
-	createRoomHandler(w http.ResponseWriter, r *http.Request) HubServeError
-	joinRoomHandler(w http.ResponseWriter, r *http.Request) HubServeError
-	writeMsgToRoomHandler(w http.ResponseWriter, r *http.Request) HubServeError
+	http.Handler
+	HubServeFunctions
+}
+
+type HubServeFunctions interface {
+	createRoomHandler(w http.ResponseWriter, r *http.Request) JsonError
+	joinRoomHandler(w http.ResponseWriter, r *http.Request) JsonError
+	writeMsgToRoomHandler(w http.ResponseWriter, r *http.Request) JsonError
 }
 
 type HubServe struct {
@@ -47,18 +34,9 @@ type HubServe struct {
 func NewHubServe(hub hub.HubRoomAndUser) *HubServe {
 	hs := &HubServe{hub: hub}
 
-	hs.serveMux.Handle(
-		"GET /room/{id}",
-		hs.jsonResponse(hs.errorHandler(hs.createRoomHandler)),
-	)
-	hs.serveMux.Handle(
-		"GET /room/join/{id}",
-		hs.jsonResponse(hs.errorHandler(hs.joinRoomHandler)),
-	)
-	hs.serveMux.Handle(
-		"POST /room/publish/{id}",
-		hs.jsonResponse(hs.errorHandler(hs.writeMsgToRoomHandler)),
-	)
+	hs.serveMux.Handle("GET /room/{id}", hs.createRoomHandler)
+	hs.serveMux.Handle("GET /room/join/{id}", hs.joinRoomHandler)
+	hs.serveMux.Handle("POST /room/publish/{id}", hs.writeMsgToRoomHandler)
 	return hs
 }
 
@@ -74,25 +52,7 @@ func (hubServe *HubServe) authorize(r *http.Request) (string, error) {
 	return token, nil
 }
 
-func (hubServe *HubServe) jsonResponse(handler http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		handler.ServeHTTP(w, r)
-	})
-}
-
-func (hubServe *HubServe) errorHandler(
-	handler func(w http.ResponseWriter, r *http.Request) HubServeError,
-) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := handler(w, r); err != nil {
-			w.WriteHeader(err.Code())
-			w.Write([]byte(err.Error()))
-		}
-	})
-}
-
-func (hubServe *HubServe) createRoomHandler(w http.ResponseWriter, r *http.Request) HubServeError {
+func (hubServe *HubServe) createRoomHandler(w http.ResponseWriter, r *http.Request) JsonError {
 	_, err := hubServe.authorize(r)
 	if err != nil {
 		return NewUnauthorizedError(err, "Unauthorized")
@@ -109,7 +69,7 @@ func (hubServe *HubServe) createRoomHandler(w http.ResponseWriter, r *http.Reque
 	return hubServe.joinRoomHandler(w, r)
 }
 
-func (hubServe *HubServe) joinRoomHandler(w http.ResponseWriter, r *http.Request) HubServeError {
+func (hubServe *HubServe) joinRoomHandler(w http.ResponseWriter, r *http.Request) JsonError {
 	token, err := hubServe.authorize(r)
 	if err != nil {
 		return NewUnauthorizedError(err, "Unauthorized")
@@ -145,13 +105,10 @@ func (hubServe *HubServe) joinRoomHandler(w http.ResponseWriter, r *http.Request
 func (hubServe *HubServe) writeMsgToRoomHandler(
 	w http.ResponseWriter,
 	r *http.Request,
-) HubServeError {
+) JsonError {
 	token, err := hubServe.authorize(r)
 	if err != nil {
 		return NewUnauthorizedError(err, "Unauthorized")
-	}
-	if r.Header.Get("Content-Type") != "application/json" {
-		return NewBadRequestError(err, "Json endpoint.")
 	}
 
 	id := r.PathValue("id")
