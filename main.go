@@ -26,12 +26,12 @@ func startServer() error {
 		return errors.New("Missing address to listen in first argument!")
 	}
 
-	var hubHandler serve.HubServeRequestResponseHandler
-	hubHandler = serve.NewHubServe(hub.NewHub())
+	var hubServe serve.HubServeHandler
+	hubServe = serve.NewHubServe(hub.NewHub())
 
 	s := &http.Server{
 		Addr:         os.Args[1],
-		Handler:      hubHandler,
+		Handler:      hubServe,
 		ReadTimeout:  time.Second * 10,
 		WriteTimeout: time.Second * 10,
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 
 	"github.com/coder/websocket"
@@ -15,28 +14,15 @@ import (
 	"github.com/LeoPazEs/our-pomodoro-sync/internal/pomodoro/user"
 )
 
-type HubServeRequestResponseHandler interface {
-	http.Handler
-	RequestHandler
-	ResponseHandler
-	HubServeHandler
-}
-
-type RequestHandler interface {
-	authorize(r *http.Request) (string, error)
-}
-
-type ResponseHandler interface {
-	jsonResponse(handler http.Handler) http.Handler
-	errorHandler(
-		handler func(w http.ResponseWriter, r *http.Request) HubServeError,
-	) http.Handler
-}
-
 type HubServeHandler interface {
-	createRoomHandler(w http.ResponseWriter, r *http.Request) HubServeError
-	joinRoomHandler(w http.ResponseWriter, r *http.Request) HubServeError
-	writeMsgToRoomHandler(w http.ResponseWriter, r *http.Request) HubServeError
+	http.Handler
+	HubServeFunctions
+}
+
+type HubServeFunctions interface {
+	createRoomHandler(w http.ResponseWriter, r *http.Request) JsonError
+	joinRoomHandler(w http.ResponseWriter, r *http.Request) JsonError
+	writeMsgToRoomHandler(w http.ResponseWriter, r *http.Request) JsonError
 }
 
 type HubServe struct {
@@ -47,18 +33,9 @@ type HubServe struct {
 func NewHubServe(hub hub.HubRoomAndUser) *HubServe {
 	hs := &HubServe{hub: hub}
 
-	hs.serveMux.Handle(
-		"GET /room/{id}",
-		hs.jsonResponse(hs.errorHandler(hs.createRoomHandler)),
-	)
-	hs.serveMux.Handle(
-		"GET /room/join/{id}",
-		hs.jsonResponse(hs.errorHandler(hs.joinRoomHandler)),
-	)
-	hs.serveMux.Handle(
-		"POST /room/publish/{id}",
-		hs.jsonResponse(hs.errorHandler(hs.writeMsgToRoomHandler)),
-	)
+	hs.serveMux.Handle("GET /room/{id}", JsonHandleFunc(hs.createRoomHandler))
+	hs.serveMux.Handle("GET /room/join/{id}", JsonHandleFunc(hs.joinRoomHandler))
+	hs.serveMux.Handle("POST /room/publish/{id}", JsonHandleFunc(hs.writeMsgToRoomHandler))
 	return hs
 }
 
@@ -74,48 +51,28 @@ func (hubServe *HubServe) authorize(r *http.Request) (string, error) {
 	return token, nil
 }
 
-func (hubServe *HubServe) jsonResponse(handler http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		handler.ServeHTTP(w, r)
-	})
-}
-
-func (hubServe *HubServe) errorHandler(
-	handler func(w http.ResponseWriter, r *http.Request) HubServeError,
-) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := handler(w, r); err != nil {
-			w.WriteHeader(err.Code())
-			w.Write([]byte(err.Error()))
-		}
-	})
-}
-
-func (hubServe *HubServe) createRoomHandler(w http.ResponseWriter, r *http.Request) HubServeError {
+func (hubServe *HubServe) createRoomHandler(w http.ResponseWriter, r *http.Request) JsonError {
 	_, err := hubServe.authorize(r)
 	if err != nil {
 		return NewUnauthorizedError(err, "Unauthorized")
 	}
 
 	id := r.PathValue("id")
-
 	id, err = hubServe.hub.RegisterRoom(id)
 	if err != nil {
 		return NewConflictError(err, err.Error())
 	}
 
-	// This looks bad
 	return hubServe.joinRoomHandler(w, r)
 }
 
-func (hubServe *HubServe) joinRoomHandler(w http.ResponseWriter, r *http.Request) HubServeError {
+func (hubServe *HubServe) joinRoomHandler(w http.ResponseWriter, r *http.Request) JsonError {
 	token, err := hubServe.authorize(r)
 	if err != nil {
 		return NewUnauthorizedError(err, "Unauthorized")
 	}
-	id := r.PathValue("id")
 
+	id := r.PathValue("id")
 	userObj := user.NewUser(token)
 	err = hubServe.hub.SubscribeUserToRoom(id, token, userObj)
 	if err != nil {
@@ -145,31 +102,26 @@ func (hubServe *HubServe) joinRoomHandler(w http.ResponseWriter, r *http.Request
 func (hubServe *HubServe) writeMsgToRoomHandler(
 	w http.ResponseWriter,
 	r *http.Request,
-) HubServeError {
+) JsonError {
+	err := jsonRequest(r)
+	if err != nil {
+		return NewBadRequestError(err, err.Error())
+	}
 	token, err := hubServe.authorize(r)
 	if err != nil {
 		return NewUnauthorizedError(err, "Unauthorized")
 	}
-	if r.Header.Get("Content-Type") != "application/json" {
-		return NewBadRequestError(err, "Json endpoint.")
-	}
 
-	id := r.PathValue("id")
-
+	d := json.NewDecoder(r.Body)
+	d.DisallowUnknownFields()
 	msg := message.Message{}
-	body, err := io.ReadAll(r.Body)
+	err = d.Decode(&msg)
 	if err != nil {
-		http.Error(w, "Failed to read request body.", http.StatusInternalServerError)
-		return nil
-	}
-	r.Body.Close()
-
-	err = json.Unmarshal(body, &msg)
-	if err != nil {
-		return NewBadRequestError(err, "Decoding error, check json format.")
+		return NewBadRequestError(err, err.Error())
 	}
 
 	jsonMsg, _ := json.Marshal(msg)
+	id := r.PathValue("id")
 	err = hubServe.hub.PublishToRoom(id, jsonMsg, token)
 	if err != nil {
 		if errors.Is(err, hub.RoomDoesNotExistsError) {
@@ -183,6 +135,5 @@ func (hubServe *HubServe) writeMsgToRoomHandler(
 
 	w.WriteHeader(http.StatusAccepted)
 	w.Write(jsonMsg)
-
 	return nil
 }
