@@ -3,6 +3,7 @@ package serve
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 )
 
 type JsonError interface {
@@ -18,20 +19,20 @@ type JsonErrorImpl struct {
 	code     int
 }
 
-func (hubError *JsonErrorImpl) ErrorObj() error {
-	return hubError.errorObj
+func (jse *JsonErrorImpl) ErrorObj() error {
+	return jse.errorObj
 }
 
-func (hubError *JsonErrorImpl) Message() string {
-	return hubError.message
+func (jse *JsonErrorImpl) Message() string {
+	return strconv.Quote(jse.message)
 }
 
-func (hubError *JsonErrorImpl) Code() int {
-	return hubError.code
+func (jse *JsonErrorImpl) Code() int {
+	return jse.code
 }
 
-func (hubError *JsonErrorImpl) Error() string {
-	return fmt.Sprintf(`{"code": %d,"message": "%s"}`, hubError.code, hubError.message)
+func (jse *JsonErrorImpl) Error() string {
+	return fmt.Sprintf(`{"code": %d,"message": %s}`, jse.code, jse.Message())
 }
 
 func NewUnauthorizedError(originError error, message string) JsonError {

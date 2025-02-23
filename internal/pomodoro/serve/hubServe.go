@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 
 	"github.com/coder/websocket"
@@ -34,9 +33,9 @@ type HubServe struct {
 func NewHubServe(hub hub.HubRoomAndUser) *HubServe {
 	hs := &HubServe{hub: hub}
 
-	hs.serveMux.Handle("GET /room/{id}", hs.createRoomHandler)
-	hs.serveMux.Handle("GET /room/join/{id}", hs.joinRoomHandler)
-	hs.serveMux.Handle("POST /room/publish/{id}", hs.writeMsgToRoomHandler)
+	hs.serveMux.Handle("GET /room/{id}", JsonHandleFunc(hs.createRoomHandler))
+	hs.serveMux.Handle("GET /room/join/{id}", JsonHandleFunc(hs.joinRoomHandler))
+	hs.serveMux.Handle("POST /room/publish/{id}", JsonHandleFunc(hs.writeMsgToRoomHandler))
 	return hs
 }
 
@@ -59,13 +58,11 @@ func (hubServe *HubServe) createRoomHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	id := r.PathValue("id")
-
 	id, err = hubServe.hub.RegisterRoom(id)
 	if err != nil {
 		return NewConflictError(err, err.Error())
 	}
 
-	// This looks bad
 	return hubServe.joinRoomHandler(w, r)
 }
 
@@ -74,8 +71,8 @@ func (hubServe *HubServe) joinRoomHandler(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		return NewUnauthorizedError(err, "Unauthorized")
 	}
-	id := r.PathValue("id")
 
+	id := r.PathValue("id")
 	userObj := user.NewUser(token)
 	err = hubServe.hub.SubscribeUserToRoom(id, token, userObj)
 	if err != nil {
@@ -106,27 +103,25 @@ func (hubServe *HubServe) writeMsgToRoomHandler(
 	w http.ResponseWriter,
 	r *http.Request,
 ) JsonError {
+	err := jsonRequest(r)
+	if err != nil {
+		return NewBadRequestError(err, err.Error())
+	}
 	token, err := hubServe.authorize(r)
 	if err != nil {
 		return NewUnauthorizedError(err, "Unauthorized")
 	}
 
-	id := r.PathValue("id")
-
+	d := json.NewDecoder(r.Body)
+	d.DisallowUnknownFields()
 	msg := message.Message{}
-	body, err := io.ReadAll(r.Body)
+	err = d.Decode(&msg)
 	if err != nil {
-		http.Error(w, "Failed to read request body.", http.StatusInternalServerError)
-		return nil
-	}
-	r.Body.Close()
-
-	err = json.Unmarshal(body, &msg)
-	if err != nil {
-		return NewBadRequestError(err, "Decoding error, check json format.")
+		return NewBadRequestError(err, err.Error())
 	}
 
 	jsonMsg, _ := json.Marshal(msg)
+	id := r.PathValue("id")
 	err = hubServe.hub.PublishToRoom(id, jsonMsg, token)
 	if err != nil {
 		if errors.Is(err, hub.RoomDoesNotExistsError) {
@@ -140,6 +135,5 @@ func (hubServe *HubServe) writeMsgToRoomHandler(
 
 	w.WriteHeader(http.StatusAccepted)
 	w.Write(jsonMsg)
-
 	return nil
 }
