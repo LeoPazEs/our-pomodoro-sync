@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/LeoPazEs/our-pomodoro-sync/internal/pomodoro/hub"
+	"github.com/LeoPazEs/our-pomodoro-sync/internal/pomodoro/room"
 	"github.com/LeoPazEs/our-pomodoro-sync/internal/pomodoro/serve"
 )
 
@@ -27,7 +28,8 @@ func startServer() error {
 	}
 
 	var hubServe serve.HubServeHandler
-	hubServe = serve.NewHubServe(hub.NewHub())
+	rooms := make(map[string]room.RoomUserHandler)
+	hubServe = serve.NewHubServe(hub.NewHub(rooms))
 
 	s := &http.Server{
 		Addr:         os.Args[1],

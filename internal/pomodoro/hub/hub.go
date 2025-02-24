@@ -29,9 +29,9 @@ type Hub struct {
 	rooms   map[string]room.RoomUserHandler
 }
 
-func NewHub() *Hub {
+func NewHub(rooms map[string]room.RoomUserHandler) *Hub {
 	hub := &Hub{
-		rooms: make(map[string]room.RoomUserHandler),
+		rooms: rooms,
 	}
 	return hub
 }
