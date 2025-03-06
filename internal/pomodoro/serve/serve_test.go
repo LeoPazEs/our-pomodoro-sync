@@ -11,13 +11,15 @@ import (
 
 	"github.com/LeoPazEs/our-pomodoro-sync/internal/pomodoro/hub"
 	"github.com/LeoPazEs/our-pomodoro-sync/internal/pomodoro/room"
+	"github.com/LeoPazEs/our-pomodoro-sync/internal/pomodoro/user"
 	"github.com/coder/websocket"
 )
 
 func TestCreateRoom(t *testing.T) {
 	t.Parallel()
-	rooms := make(map[string]room.RoomUserHandler)
-	hubData := hub.NewHub(rooms)
+	rooms := make(map[string]*room.Room)
+	users := make(map[string]*user.User)
+	hubData := hub.NewHub(rooms, users)
 	hubServe := NewHubServe(hubData)
 	s := httptest.NewServer(hubServe)
 	defer s.Close()
@@ -35,16 +37,25 @@ func TestCreateRoom(t *testing.T) {
 	}
 	defer c.CloseNow()
 
-	if users := rooms["12345"].CountUsers(); users != 1 {
-		t.Fatalf("Wrong number of users registered : %d", users)
+	if usersCount := rooms["12345"].CountUsers(); usersCount != 1 {
+		t.Fatalf("Wrong number of users registered : %d", usersCount)
+	}
+
+	userObj, ok := users["teste"]
+	if !ok {
+		t.Fatal("User not added to users map.")
+	}
+	if userObj.Room != "12345" {
+		t.Fatal("Wrong user Room in user obj.")
 	}
 }
 
 func TestJoinRoom(t *testing.T) {
 	t.Parallel()
-	rooms := make(map[string]room.RoomUserHandler)
+	rooms := make(map[string]*room.Room)
+	users := make(map[string]*user.User)
 	rooms["12345"] = room.NewRoom()
-	hubData := hub.NewHub(rooms)
+	hubData := hub.NewHub(rooms, users)
 	hubServe := NewHubServe(hubData)
 	s := httptest.NewServer(hubServe)
 	defer s.Close()
@@ -69,9 +80,10 @@ func TestJoinRoom(t *testing.T) {
 
 func TestWriteToRoom(t *testing.T) {
 	t.Parallel()
-	rooms := make(map[string]room.RoomUserHandler)
+	rooms := make(map[string]*room.Room)
+	users := make(map[string]*user.User)
 	rooms["12345"] = room.NewRoom()
-	hubData := hub.NewHub(rooms)
+	hubData := hub.NewHub(rooms, users)
 	hubServe := NewHubServe(hubData)
 	s := httptest.NewServer(hubServe)
 	defer s.Close()
@@ -122,9 +134,10 @@ func TestWriteToRoom(t *testing.T) {
 
 func TestWriteToRoomUnauthorized(t *testing.T) {
 	t.Parallel()
-	rooms := make(map[string]room.RoomUserHandler)
+	rooms := make(map[string]*room.Room)
+	users := make(map[string]*user.User)
 	rooms["12345"] = room.NewRoom()
-	hubData := hub.NewHub(rooms)
+	hubData := hub.NewHub(rooms, users)
 	hubServe := NewHubServe(hubData)
 	s := httptest.NewServer(hubServe)
 	defer s.Close()

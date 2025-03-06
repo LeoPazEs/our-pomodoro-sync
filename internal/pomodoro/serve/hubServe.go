@@ -43,12 +43,18 @@ func (hubServe *HubServe) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	hubServe.serveMux.ServeHTTP(w, r)
 }
 
-func (hubServe *HubServe) authorize(r *http.Request) (string, error) {
+func (hubServe *HubServe) authorize(r *http.Request) (*user.User, error) {
 	token := r.Header.Get("Authorization")
 	if len(token) <= 0 {
-		return "", errors.New("Token not found.")
+		return nil, errors.New("Token not found.")
 	}
-	return token, nil
+
+	userObj, ok := hubServe.hub.Users[token]
+	if ok {
+		return userObj, nil
+	}
+
+	return user.NewUser(token), nil
 }
 
 func (hubServe *HubServe) createRoomHandler(w http.ResponseWriter, r *http.Request) JsonError {
@@ -67,13 +73,12 @@ func (hubServe *HubServe) createRoomHandler(w http.ResponseWriter, r *http.Reque
 }
 
 func (hubServe *HubServe) joinRoomHandler(w http.ResponseWriter, r *http.Request) JsonError {
-	token, err := hubServe.authorize(r)
+	userObj, err := hubServe.authorize(r)
 	if err != nil {
 		return NewUnauthorizedError(err, "Unauthorized")
 	}
 
 	id := r.PathValue("id")
-	userObj := user.NewUser(token)
 	err = hubServe.hub.SubscribeUserToRoom(id, userObj)
 	if err != nil {
 		return NewConflictError(err, err.Error())
