@@ -78,6 +78,55 @@ func TestJoinRoom(t *testing.T) {
 	}
 }
 
+func TestLeaveRoom(t *testing.T) {
+	t.Parallel()
+	rooms := make(map[string]*room.Room)
+	rooms["12345"] = room.NewRoom()
+	users := make(map[string]*user.User)
+	hubData := hub.NewHub(rooms, users)
+	hubServe := NewHubServe(hubData)
+	s := httptest.NewServer(hubServe)
+	defer s.Close()
+	u := "ws" + strings.TrimPrefix(s.URL+"/room/join/12345", "http")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	header := http.Header{}
+	header.Add("Authorization", "teste")
+	opts := websocket.DialOptions{HTTPHeader: header}
+	c, _, err := websocket.Dial(ctx, u, &opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+	userObj := user.NewUser("teste")
+	userConnObj := user.NewUserConn(c, ctx, cancel)
+	userObj.Connect(userConnObj)
+
+	req, err := http.NewRequest(
+		http.MethodDelete,
+		s.URL+"room/leave",
+		nil,
+	)
+
+	req.Header.Add("Content-Type", "application/json")
+	req.Header.Add("Authorization", "teste")
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 204 {
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Fatalf("Error leaving room, status code %d", res.StatusCode)
+	}
+	if userObj.Conn.Ctx.Err() != nil {
+		t.Fatal("Context still alive.")
+	}
+}
+
 func TestWriteToRoom(t *testing.T) {
 	t.Parallel()
 	rooms := make(map[string]*room.Room)

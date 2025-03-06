@@ -26,7 +26,6 @@ func (hub *Hub) DeleteEmptyRoom(roomId string) {
 	hub.hubMu.Lock()
 	defer hub.hubMu.Unlock()
 
-	// For now if someone enters the room between the count and the delete the room is excluded
 	if hub.Rooms[roomId].CountUsers() > 0 {
 		return
 	}
@@ -75,9 +74,10 @@ func (hub *Hub) SubscribeUserToRoom(
 	return nil
 }
 
-func (hub *Hub) UnsubscribeUserToRoom(roomId string, user *user.User) {
+func (hub *Hub) UnsubscribeUserToRoom(user *user.User) {
 	hub.hubMu.Lock()
 	defer hub.hubMu.Unlock()
-	hub.Rooms[roomId].UnsubscribeUser(user)
+	hub.Rooms[user.Room].UnsubscribeUser(user)
+	user.Disconnect()
 	delete(hub.Users, user.Username)
 }

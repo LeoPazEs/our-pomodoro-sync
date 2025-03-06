@@ -28,7 +28,7 @@ func startServer() error {
 		return errors.New("Missing address to listen in first argument!")
 	}
 
-	var hubServe serve.HubServeHandler
+	var hubServe *serve.HubServe
 	rooms := make(map[string]*room.Room)
 	users := make(map[string]*user.User)
 	hubServe = serve.NewHubServe(hub.NewHub(rooms, users))
