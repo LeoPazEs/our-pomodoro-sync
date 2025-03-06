@@ -98,7 +98,7 @@ func (hubServe *HubServe) joinRoomHandler(w http.ResponseWriter, r *http.Request
 
 func (hubServe *HubServe) leaveRoomHandler(w http.ResponseWriter, r *http.Request) JsonError {
 	userObj, err := hubServe.authorize(r)
-	if err != nil {
+	if err != nil || userObj.Room == "" {
 		return NewUnauthorizedError(err, "Unauthorized")
 	}
 	hubServe.hub.UnsubscribeUserToRoom(userObj)
