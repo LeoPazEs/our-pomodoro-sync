@@ -28,7 +28,7 @@ func startServer() error {
 	}
 
 	var hubServe serve.HubServeHandler
-	rooms := make(map[string]room.RoomUserHandler)
+	rooms := make(map[string]*room.Room)
 	hubServe = serve.NewHubServe(hub.NewHub(rooms))
 
 	s := &http.Server{

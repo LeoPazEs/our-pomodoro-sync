@@ -27,10 +27,10 @@ type HubServeFunctions interface {
 
 type HubServe struct {
 	serveMux http.ServeMux
-	hub      hub.HubRoomAndUser
+	hub      *hub.Hub
 }
 
-func NewHubServe(hub hub.HubRoomAndUser) *HubServe {
+func NewHubServe(hub *hub.Hub) *HubServe {
 	hs := &HubServe{hub: hub}
 
 	hs.serveMux.Handle("GET /room/{id}", JsonHandleFunc(hs.createRoomHandler))
@@ -74,7 +74,7 @@ func (hubServe *HubServe) joinRoomHandler(w http.ResponseWriter, r *http.Request
 
 	id := r.PathValue("id")
 	userObj := user.NewUser(token)
-	err = hubServe.hub.SubscribeUserToRoom(id, token, userObj)
+	err = hubServe.hub.SubscribeUserToRoom(id, userObj)
 	if err != nil {
 		return NewConflictError(err, err.Error())
 	}
@@ -86,7 +86,7 @@ func (hubServe *HubServe) joinRoomHandler(w http.ResponseWriter, r *http.Request
 			"Failed to establish WebSocket connection",
 			http.StatusInternalServerError,
 		)
-		hubServe.hub.UnsubscribeUserToRoom(id, token, userObj)
+		hubServe.hub.UnsubscribeUserToRoom(id, userObj)
 		hubServe.hub.DeleteEmptyRoom(id)
 		return nil
 	}
@@ -94,7 +94,7 @@ func (hubServe *HubServe) joinRoomHandler(w http.ResponseWriter, r *http.Request
 	userObj.Connect(userConn)
 
 	userConn.ReadMsgChannel(context.Background())
-	hubServe.hub.UnsubscribeUserToRoom(id, token, userObj)
+	hubServe.hub.UnsubscribeUserToRoom(id, userObj)
 	hubServe.hub.DeleteEmptyRoom(id)
 	return nil
 }

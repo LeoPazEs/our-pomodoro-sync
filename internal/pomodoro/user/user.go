@@ -1,18 +1,14 @@
 package user
 
-type UserHandler interface {
-	WriteMsg([]byte)
-	Connect(ws ConnHandler)
-}
-
 type User struct {
 	conn     ConnHandler
-	username string
+	Username string
+	Room     string
 }
 
 func NewUser(token string) *User {
 	return &User{
-		username: token,
+		Username: token,
 	}
 }
 

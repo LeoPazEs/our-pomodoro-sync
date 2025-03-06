@@ -8,28 +8,13 @@ import (
 	"github.com/LeoPazEs/our-pomodoro-sync/internal/pomodoro/user"
 )
 
-type HubRoomHandler interface {
-	DeleteEmptyRoom(roomId string)
-	RegisterRoom(roomId string) (string, error)
-	PublishToRoom(roomId string, msg []byte, username string) error
-}
-
-type HubUserHandler interface {
-	SubscribeUserToRoom(roomId string, username string, userObj user.UserHandler) error
-	UnsubscribeUserToRoom(roomId string, username string, userObj user.UserHandler)
-}
-
-type HubRoomAndUser interface {
-	HubUserHandler
-	HubRoomHandler
-}
-
 type Hub struct {
 	roomsMu sync.Mutex
-	rooms   map[string]room.RoomUserHandler
+	rooms   map[string]*room.Room
+	users   *user.User
 }
 
-func NewHub(rooms map[string]room.RoomUserHandler) *Hub {
+func NewHub(rooms map[string]*room.Room) *Hub {
 	hub := &Hub{
 		rooms: rooms,
 	}
@@ -58,7 +43,7 @@ func (hub *Hub) RegisterRoom(roomId string) (string, error) {
 	return "", errors.New("Room already exists.")
 }
 
-func (hub *Hub) PublishToRoom(roomId string, msg []byte, username string) error {
+func (hub *Hub) PublishToRoom(roomId string, msg []byte, user *user.User) error {
 	hub.roomsMu.Lock()
 	defer hub.roomsMu.Unlock()
 
@@ -66,14 +51,13 @@ func (hub *Hub) PublishToRoom(roomId string, msg []byte, username string) error 
 	if !ok {
 		return RoomDoesNotExistsError
 	}
-	err := roomObj.Publish(msg, username)
+	err := roomObj.Publish(msg, user)
 	return err
 }
 
 func (hub *Hub) SubscribeUserToRoom(
 	roomId string,
-	username string,
-	userObj user.UserHandler,
+	user *user.User,
 ) error {
 	hub.roomsMu.Lock()
 	defer hub.roomsMu.Unlock()
@@ -82,12 +66,12 @@ func (hub *Hub) SubscribeUserToRoom(
 	if !ok {
 		return errors.New("Room does not exist.")
 	}
-	roomObj.SubscribeUser(username, userObj)
+	roomObj.SubscribeUser(user)
 	return nil
 }
 
-func (hub *Hub) UnsubscribeUserToRoom(roomId string, username string, userObj user.UserHandler) {
+func (hub *Hub) UnsubscribeUserToRoom(roomId string, user *user.User) {
 	hub.roomsMu.Lock()
 	defer hub.roomsMu.Unlock()
-	hub.rooms[roomId].UnsubscribeUser(username)
+	hub.rooms[roomId].UnsubscribeUser(user)
 }

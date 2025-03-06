@@ -9,34 +9,27 @@ import (
 	"golang.org/x/time/rate"
 )
 
-type RoomUserHandler interface {
-	Publish(msg []byte, username string) error
-	SubscribeUser(username string, user user.UserHandler)
-	UnsubscribeUser(username string)
-	CountUsers() int
-}
-
 type Room struct {
 	dataBuffer   int
 	publishLimit *rate.Limiter
 
 	userMux sync.Mutex
-	users   map[string]user.UserHandler
+	users   map[string]*user.User
 }
 
 func NewRoom() *Room {
 	r := &Room{
 		dataBuffer:   16,
 		publishLimit: rate.NewLimiter(rate.Every(time.Millisecond*8), 8), // 8 tokens every 8 ms
-		users:        make(map[string]user.UserHandler),
+		users:        make(map[string]*user.User),
 	}
 	return r
 }
 
-func (room *Room) Publish(msg []byte, username string) error {
+func (room *Room) Publish(msg []byte, user *user.User) error {
 	room.userMux.Lock()
 	defer room.userMux.Unlock()
-	if _, ok := room.users[username]; !ok {
+	if _, ok := room.users[user.Username]; !ok {
 		// Make error handling
 		return UserNotInRoomError
 	}
@@ -48,16 +41,16 @@ func (room *Room) Publish(msg []byte, username string) error {
 	return nil
 }
 
-func (room *Room) SubscribeUser(username string, userObj user.UserHandler) {
+func (room *Room) SubscribeUser(user *user.User) {
 	room.userMux.Lock()
 	defer room.userMux.Unlock()
-	room.users[username] = userObj
+	room.users[user.Username] = user
 }
 
-func (room *Room) UnsubscribeUser(username string) {
+func (room *Room) UnsubscribeUser(user *user.User) {
 	room.userMux.Lock()
 	defer room.userMux.Unlock()
-	delete(room.users, username)
+	delete(room.users, user.Username)
 }
 
 func (room *Room) CountUsers() int {
