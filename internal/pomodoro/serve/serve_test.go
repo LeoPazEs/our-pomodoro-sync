@@ -119,3 +119,35 @@ func TestWriteToRoom(t *testing.T) {
 		t.Fatal(string(msg))
 	}
 }
+
+func TestWriteToRoomUnauthorized(t *testing.T) {
+	t.Parallel()
+	rooms := make(map[string]room.RoomUserHandler)
+	rooms["12345"] = room.NewRoom()
+	hubData := hub.NewHub(rooms)
+	hubServe := NewHubServe(hubData)
+	s := httptest.NewServer(hubServe)
+	defer s.Close()
+
+	req, err := http.NewRequest(
+		http.MethodPost,
+		s.URL+"/room/publish/12345",
+		strings.NewReader(`{"content":"hello"}`),
+	)
+	req.Header.Add("Content-Type", "application/json")
+	req.Header.Add("Authorization", "teste")
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 403 {
+		body, err := io.ReadAll(res.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Error(string(body))
+		t.Fatalf("Error sending message, status code %d", res.StatusCode)
+	}
+}
