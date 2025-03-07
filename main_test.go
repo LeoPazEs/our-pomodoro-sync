@@ -1,4 +1,4 @@
-package serve
+package main
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 
 	"github.com/LeoPazEs/our-pomodoro-sync/internal/pomodoro/hub"
 	"github.com/LeoPazEs/our-pomodoro-sync/internal/pomodoro/room"
+	"github.com/LeoPazEs/our-pomodoro-sync/internal/pomodoro/serve"
 	"github.com/LeoPazEs/our-pomodoro-sync/internal/pomodoro/user"
 	"github.com/coder/websocket"
 )
@@ -20,7 +21,7 @@ func TestCreateRoom(t *testing.T) {
 	rooms := make(map[string]*room.Room)
 	users := make(map[string]*user.User)
 	hubData := hub.NewHub(rooms, users)
-	hubServe := NewHubServe(hubData)
+	hubServe := serve.NewHubServe(hubData)
 	s := httptest.NewServer(hubServe)
 	defer s.Close()
 
@@ -56,7 +57,7 @@ func TestJoinRoom(t *testing.T) {
 	users := make(map[string]*user.User)
 	rooms["12345"] = room.NewRoom()
 	hubData := hub.NewHub(rooms, users)
-	hubServe := NewHubServe(hubData)
+	hubServe := serve.NewHubServe(hubData)
 	s := httptest.NewServer(hubServe)
 	defer s.Close()
 
@@ -84,7 +85,7 @@ func TestLeaveRoom(t *testing.T) {
 	rooms["12345"] = room.NewRoom()
 	users := make(map[string]*user.User)
 	hubData := hub.NewHub(rooms, users)
-	hubServe := NewHubServe(hubData)
+	hubServe := serve.NewHubServe(hubData)
 	s := httptest.NewServer(hubServe)
 	defer s.Close()
 	u := "ws" + strings.TrimPrefix(s.URL+"/room/join/12345", "http")
@@ -133,7 +134,7 @@ func TestWriteToRoom(t *testing.T) {
 	users := make(map[string]*user.User)
 	rooms["12345"] = room.NewRoom()
 	hubData := hub.NewHub(rooms, users)
-	hubServe := NewHubServe(hubData)
+	hubServe := serve.NewHubServe(hubData)
 	s := httptest.NewServer(hubServe)
 	defer s.Close()
 
@@ -187,7 +188,7 @@ func TestWriteToRoomUnauthorized(t *testing.T) {
 	users := make(map[string]*user.User)
 	rooms["12345"] = room.NewRoom()
 	hubData := hub.NewHub(rooms, users)
-	hubServe := NewHubServe(hubData)
+	hubServe := serve.NewHubServe(hubData)
 	s := httptest.NewServer(hubServe)
 	defer s.Close()
 
