@@ -90,8 +90,11 @@ func (hubServe *HubServe) joinRoomHandler(w http.ResponseWriter, r *http.Request
 	userConn := user.NewUserConn(conn, ctx, cancel)
 	userObj.Connect(userConn)
 
-	defer hubServe.leaveRoomHandler(w, r)
 	userConn.ReadMsgChannel(ctx)
+
+	if ctx.Err() != context.Canceled {
+		hubServe.leaveRoomHandler(w, r)
+	}
 
 	return nil
 }
