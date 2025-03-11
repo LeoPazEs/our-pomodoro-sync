@@ -10,34 +10,35 @@ import (
 
 type Hub struct {
 	hubMu sync.Mutex
-	Rooms map[string]*room.Room
-	Users map[string]*user.User
+	rooms map[string]*room.Room
+	users map[string]*user.User
 }
 
 func NewHub(rooms map[string]*room.Room, users map[string]*user.User) *Hub {
 	hub := &Hub{
-		Rooms: rooms,
-		Users: users,
+		rooms: rooms,
+		users: users,
 	}
 	return hub
 }
 
-func (hub *Hub) DeleteEmptyRoom(roomId string) {
+func (hub *Hub) Users(username string) (*user.User, error) {
 	hub.hubMu.Lock()
+	userObj, ok := hub.users[username]
 	defer hub.hubMu.Unlock()
-
-	if hub.Rooms[roomId].CountUsers() > 0 {
-		return
+	if ok {
+		return userObj, nil
 	}
-	delete(hub.Rooms, roomId)
+
+	return user.NewUser(username), nil
 }
 
 func (hub *Hub) RegisterRoom(roomId string) (string, error) {
 	hub.hubMu.Lock()
 	defer hub.hubMu.Unlock()
 
-	if _, ok := hub.Rooms[roomId]; !ok {
-		hub.Rooms[roomId] = room.NewRoom()
+	if _, ok := hub.rooms[roomId]; !ok {
+		hub.rooms[roomId] = room.NewRoom()
 		return roomId, nil
 	}
 	return "", errors.New("Room already exists.")
@@ -47,7 +48,7 @@ func (hub *Hub) PublishToRoom(roomId string, msg []byte, user *user.User) error 
 	hub.hubMu.Lock()
 	defer hub.hubMu.Unlock()
 
-	roomObj, ok := hub.Rooms[roomId]
+	roomObj, ok := hub.rooms[roomId]
 	if !ok {
 		return RoomDoesNotExistsError
 	}
@@ -62,22 +63,37 @@ func (hub *Hub) SubscribeUserToRoom(
 	hub.hubMu.Lock()
 	defer hub.hubMu.Unlock()
 
-	roomObj, ok := hub.Rooms[roomId]
+	roomObj, ok := hub.rooms[roomId]
 	if !ok {
 		return errors.New("Room does not exist.")
 	}
 	roomObj.SubscribeUser(user)
 
 	user.Room = roomId
-	hub.Users[user.Username] = user
+	hub.users[user.Username] = user
 
 	return nil
 }
 
-func (hub *Hub) UnsubscribeUserToRoom(user *user.User) {
+func (hub *Hub) UnsubscribeUser(userObj *user.User) {
+	hub.unsubscribeUserToRoom(userObj)
+	hub.deleteEmptyRoom(userObj.Room)
+}
+
+func (hub *Hub) unsubscribeUserToRoom(user *user.User) {
 	hub.hubMu.Lock()
 	defer hub.hubMu.Unlock()
-	hub.Rooms[user.Room].UnsubscribeUser(user)
+	hub.rooms[user.Room].UnsubscribeUser(user)
 	user.Disconnect()
-	delete(hub.Users, user.Username)
+	delete(hub.users, user.Username)
+}
+
+func (hub *Hub) deleteEmptyRoom(roomId string) {
+	hub.hubMu.Lock()
+	defer hub.hubMu.Unlock()
+
+	if hub.rooms[roomId].CountUsers() > 0 {
+		return
+	}
+	delete(hub.rooms, roomId)
 }
