@@ -44,16 +44,14 @@ func (hub *Hub) RegisterRoom(roomId string) (string, error) {
 	return "", errors.New("Room already exists.")
 }
 
-func (hub *Hub) PublishToRoom(roomId string, msg []byte, user *user.User) error {
+func (hub *Hub) deleteEmptyRoom(roomId string) {
 	hub.hubMu.Lock()
 	defer hub.hubMu.Unlock()
 
-	roomObj, ok := hub.rooms[roomId]
-	if !ok {
-		return RoomDoesNotExistsError
+	if hub.rooms[roomId].CountUsers() > 0 {
+		return
 	}
-	err := roomObj.Publish(msg, user)
-	return err
+	delete(hub.rooms, roomId)
 }
 
 func (hub *Hub) SubscribeUserToRoom(
@@ -88,12 +86,14 @@ func (hub *Hub) unsubscribeUserToRoom(user *user.User) {
 	delete(hub.users, user.Username)
 }
 
-func (hub *Hub) deleteEmptyRoom(roomId string) {
+func (hub *Hub) PublishToRoom(roomId string, msg []byte, user *user.User) error {
 	hub.hubMu.Lock()
 	defer hub.hubMu.Unlock()
 
-	if hub.rooms[roomId].CountUsers() > 0 {
-		return
+	roomObj, ok := hub.rooms[roomId]
+	if !ok {
+		return RoomDoesNotExistsError
 	}
-	delete(hub.rooms, roomId)
+	err := roomObj.Publish(msg, user)
+	return err
 }
