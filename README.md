@@ -1,6 +1,6 @@
 # Our Pomodoro: A Synchronized Pomodoro Timer
 
-"our-pomodoro" is a real-time, synchronized Pomodoro timer designed for teams and collaborative work sessions. This project is a hands-on exercise to learn and implement Golang for backend development, with a special focus on WebSockets for real-time communication and an eventual goal of using binary protocols for data efficiency.
+"our-pomodoro" is a real-time, synchronized Pomodoro timer designed for teams and collaborative work sessions. This project is a hands-on exercise to learn and implement Golang for backend development, with a special focus on WebSockets for real-time communication and an eventual goal of using binary formats for data efficiency.
 
 ## How It Works
 
