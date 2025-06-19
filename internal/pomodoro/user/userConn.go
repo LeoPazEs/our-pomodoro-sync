@@ -9,14 +9,9 @@ import (
 	"github.com/coder/websocket"
 )
 
-type ConnHandler interface {
-	closeSlow()
-	ReadMsgChannel(ctx context.Context) error
-	sendMsg(ctx context.Context, msg []byte) error
-	writeToBuffer(msg []byte)
-}
-
 type UserConn struct {
+	Ctx     context.Context
+	Cancel  context.CancelFunc
 	connMu  sync.Mutex
 	closed  bool
 	conn    *websocket.Conn
@@ -24,8 +19,14 @@ type UserConn struct {
 	timeout time.Duration
 }
 
-func NewUserConn(conn *websocket.Conn) *UserConn {
-	return &UserConn{conn: conn, msgs: make(chan []byte), timeout: time.Second * 5}
+func NewUserConn(conn *websocket.Conn, ctx context.Context, cancel context.CancelFunc) *UserConn {
+	return &UserConn{
+		conn:    conn,
+		msgs:    make(chan []byte),
+		timeout: time.Second * 5,
+		Ctx:     ctx,
+		Cancel:  cancel,
+	}
 }
 
 func (uc *UserConn) closeSlow() {
